@@ -10,6 +10,10 @@ YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
 YOUTUBE_CLIENT_ID = os.getenv('YOUTUBE_CLIENT_ID')
 YOUTUBE_CLIENT_SECRET = os.getenv('YOUTUBE_CLIENT_SECRET')
 
+UNSPLASH_APPLICATION_ID = os.getenv('UNSPLASH_APPLICATION_ID')
+UNSPLASH_ACCESS_KEY = os.getenv('UNSPLASH_ACCESS_KEY')
+UNSPLASH_SECRET_KEY = os.getenv('UNSPLASH_SECRET_KEY')
+
 # Diretórios do projeto
 DATA_DIR = os.path.join(os.getcwd(), 'data')
 AUDIO_DIR = os.path.join(DATA_DIR, 'audio')
