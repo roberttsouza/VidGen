@@ -27,13 +27,14 @@ def main():
                 print("Nenhuma imagem válida encontrada. Usando imagem padrão.")
                 default_image = "https://via.placeholder.com/1920x1080"
                 images = [default_image]
-
+            else:
+                images = images[:3]  # Limitar a 3 imagens
             # Criar vídeo
-            video_file = f"{VIDEOS_DIR}/video_{item['id']}.mp4"
+            video_file = f"{VIDEOS_DIR}/{item['title']}.mp4"
             create_video(audio_file, images, video_file)
             
             print(f"Vídeo gerado com sucesso: {video_file}")
-        
+
         except Exception as e:
             print(f"Erro ao processar notícia (ID: {item.get('id')}): {e}")
 
