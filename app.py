@@ -8,6 +8,7 @@ from src.apis.pexels_api import search_images
 from src.utils.video_creator import create_video
 from src.config import AUDIO_DIR, VIDEOS_DIR
 import os
+import re
 from datetime import datetime
 
 # Configuração inicial do Streamlit
@@ -19,6 +20,16 @@ st.set_page_config(
 
 st.title("🎥 CryptoCaster - Gerador de Vídeos Automáticos")
 st.markdown("Crie vídeos automáticos com base em notícias sobre Bitcoin.")
+
+# Função para normalizar título (remover caracteres especiais)
+def normalize_title(title):
+    # Substituir caracteres especiais e espaços por underscores
+    normalized = re.sub(r'[^\w\s]', '', title)
+    normalized = normalized.replace(' ', '_')
+    # Limitar tamanho para evitar nomes de arquivo muito longos
+    if len(normalized) > 100:
+        normalized = normalized[:100]
+    return normalized
 
 # Usar session_state para armazenar as notícias e evitar recarregar tudo
 if "news_data" not in st.session_state:
@@ -45,8 +56,11 @@ if st.session_state.news_data:
             if st.button(f"🎬 Gerar Vídeo para '{item['title']}'", key=f"generate_{item['id']}"):
                 with st.spinner(f"Gerando vídeo para '{item['title']}'..."):
                         try:
+                            # Criar nome de arquivo baseado no título da notícia
+                            normalized_title = normalize_title(item['title'])
+                            
                             audio_file = f"{AUDIO_DIR}/audio_{item['id']}.mp3"
-                            video_file = f"{VIDEOS_DIR}/video_{item['id']}.mp4"
+                            video_file = f"{VIDEOS_DIR}/{normalized_title}.mp4"
 
                             # Garantir diretórios existem
                             os.makedirs(os.path.dirname(audio_file), exist_ok=True)
@@ -67,15 +81,32 @@ if st.session_state.news_data:
                             if not os.path.exists(audio_file):
                                 raise FileNotFoundError(f"Áudio não encontrado: {audio_file}")
 
-                            # Buscar imagens
-                            keywords = item["title"].split()[:3]
-                            images = search_images(" ".join(keywords), item.get("tags", ""))
+                            # Buscar imagens com as palavras-chave retiradas do título, categorias e tags
+                            # Extrair termos relevantes do título
+                            keywords = [w for w in item["title"].split() if len(w) > 3]
+                            # Verificar se há termos sobre blockchain ou crypto no título
+                            crypto_terms = ["bitcoin", "blockchain", "crypto", "token", "whale", 
+                                           "transaction", "trading", "market", "nft", "currency"]
+                            
+                            # Adicionar "bitcoin" e "cryptocurrency" às palavras-chave se não houver
+                            # termos relacionados no título
+                            has_crypto_term = any(term in item["title"].lower() for term in crypto_terms)
+                            if not has_crypto_term:
+                                keywords.append("bitcoin")
+                                keywords.append("cryptocurrency")
+                            
+                            # Obter tags da notícia
+                            tags = item.get("tags", "")
+                            if not tags:
+                                tags = "bitcoin,cryptocurrency,blockchain,finance,technology"
+                            
+                            st.text(f"Buscando imagens para: {' '.join(keywords[:3])} com tags: {tags}")
+                            images = search_images(" ".join(keywords[:3]), tags)
+                            
                             if not images:
-                                images = ["https://via.placeholder.com/1920x1080?text=Bitcoin+News"]
-
-                            # Validar imagens (remove redundância)
-                            if not images:
-                                images = ["https://via.placeholder.com/1920x1080?text=Bitcoin+News"]
+                                logging.warning("Nenhuma imagem relevante encontrada. Usando imagem padrão.")
+                                images = ["https://images.pexels.com/photos/844124/pexels-photo-844124.jpeg"]
+                                st.warning("Nenhuma imagem relevante encontrada. Usando imagem padrão de Bitcoin.")
 
                             # Criar vídeo com rastreamento completo
                             try:
