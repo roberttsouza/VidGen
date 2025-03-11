@@ -5,6 +5,9 @@ from PIL import Image
 from io import BytesIO
 import logging
 import os
+import numpy as np
+from vidgear.gears import CamGear
+from vidgear.gears import WriteGear
 
 from src.config import IMAGES_DIR, VIDEOS_DIR
 
@@ -82,7 +85,26 @@ def create_video(audio_file, image_urls, output_file):
 
                 # Criar clipe de imagem com duração de 4 segundos
                 logging.info("Criando clipe de imagem...")
-                clip = ImageClip(resized_image_path, duration=4)
+                #clip = ImageClip(resized_image_path, duration=4)
+
+                # Load image with PIL
+                img = Image.open(resized_image_path)
+                # Convert to numpy array
+                img_array = np.array(img)
+
+                # Add zoom effect
+                zoom_factor = 1.1
+                h, w = img_array.shape[:2]
+                zh = int(h / zoom_factor)
+                zw = int(w / zoom_factor)
+                top = (h - zh) // 2
+                left = (w - zw) // 2
+                img_array = img_array[top:top+zh, left:left+zw]
+                img_array = Image.fromarray(img_array).resize((w, h))
+                img_array = np.array(img_array)
+
+                clip = ImageClip(img_array, duration=4)
+
                 clips.append(clip.set_start(current_time))
                 current_time += 4
 
@@ -104,7 +126,11 @@ def create_video(audio_file, image_urls, output_file):
     if not clips:
         raise ValueError("Nenhuma imagem válida foi processada.")
 
-    final_clip = concatenate_videoclips(clips)
+    # Add fade transition between clips
+    for i in range(len(clips) - 1):
+        clips[i] = clips[i].crossfadein(1.0)
+
+    final_clip = concatenate_videoclips(clips, method="compose")
 
     # Definir o áudio no vídeo
     final_clip = final_clip.set_audio(audio)
