@@ -24,3 +24,7 @@ VIDEOS_DIR = os.path.join(DATA_DIR, 'videos')
 os.makedirs(AUDIO_DIR, exist_ok=True)
 os.makedirs(IMAGES_DIR, exist_ok=True)
 os.makedirs(VIDEOS_DIR, exist_ok=True)
+
+
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+GOOGLE_CSE_ID = os.getenv('GOOGLE_CSE_ID')

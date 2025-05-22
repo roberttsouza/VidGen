@@ -1,77 +1,94 @@
 import os
 import re
-from .apis.news_api import fetch_bitcoin_news
+import logging
+from datetime import datetime
+from src.apis.news_api import fetch_bitcoin_news
 from src.utils.text_to_speech import text_to_speech
-from src.apis.pexels_api import search_images
-from src.utils.video_creator import create_video
-from src.config import AUDIO_DIR, VIDEOS_DIR
+from src.utils.video_creator import create_video_synced
+from src.config import AUDIO_DIR, VIDEOS_DIR, IMAGES_DIR
+import random
+import nltk # Para o download de recursos
 
-def normalize_title(title):
-    # Substituir caracteres especiais e espaços por underscores
-    normalized = re.sub(r'[^\w\s]', '', title)
-    normalized = normalized.replace(' ', '_')
-    # Limitar tamanho para evitar nomes de arquivo muito longos
-    if len(normalized) > 100:
-        normalized = normalized[:100]
-    return normalized
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def main():
-    # Buscar notícias recentes sobre Bitcoin
-    news = fetch_bitcoin_news()
-    if not news:
-        print("Nenhuma notícia encontrada. Encerrando o processo.")
+# --- Configuração do NLTK ---
+def setup_nltk_resources_cli():
+    resources = [("tokenizers/punkt", "punkt"), ("corpora/stopwords", "stopwords")]
+    for resource_path, resource_id in resources:
+        try:
+            nltk.data.find(resource_path)
+        except LookupError:
+            logging.info(f"Baixando recurso NLTK necessário: '{resource_id}'...")
+            nltk.download(resource_id, quiet=True)
+            logging.info(f"Recurso '{resource_id}' baixado.")
+setup_nltk_resources_cli()
+# --- Fim Configuração NLTK ---
+
+
+def normalize_title_for_file_cli(title):
+    normalized = re.sub(r'[^\w\s-]', '', title).strip()
+    normalized = re.sub(r'[-\s]+', '_', normalized)
+    return normalized[:80]
+
+def main_cli():
+    logging.info("Iniciando CryptoCaster CLI...")
+    news_items = fetch_bitcoin_news()
+    if not news_items:
+        logging.info("Nenhuma notícia encontrada. Encerrando.")
         return
 
-    for item in news:
+    os.makedirs(AUDIO_DIR, exist_ok=True)
+    os.makedirs(VIDEOS_DIR, exist_ok=True)
+    os.makedirs(IMAGES_DIR, exist_ok=True)
+
+    # Processar apenas as X primeiras para teste CLI, ou todas
+    num_news_to_process = min(len(news_items), 2) # Processa até 2 notícias
+    logging.info(f"Processando {num_news_to_process} notícias...")
+
+    for item in news_items[:num_news_to_process]:
+        news_title = item.get('title', "NoticiaDesconhecida")
+        news_id = str(item.get('id', f"cli_id_{random.randint(1000,9999)}"))
+        news_body = item.get("body", "")
+
         try:
-            # Gerar áudio
-            audio_file = f"{AUDIO_DIR}/audio_{item['id']}.mp3"
-            text_to_speech(item["title"] + ". " + item["body"], audio_file)
+            logging.info(f"Processando notícia: {news_title}")
             
-            # Buscar imagens relevantes com estratégia melhorada
-            # Extrair termos relevantes do título
-            keywords = [w for w in item["title"].split() if len(w) > 3]
-            
-            # Verificar se há termos sobre blockchain ou crypto no título
-            crypto_terms = ["bitcoin", "blockchain", "crypto", "token", "whale", 
-                           "transaction", "trading", "market", "nft", "currency"]
-            
-            # Adicionar "bitcoin" e "cryptocurrency" às palavras-chave se não houver
-            # termos relacionados no título
-            has_crypto_term = any(term in item["title"].lower() for term in crypto_terms)
-            if not has_crypto_term:
-                keywords.append("bitcoin")
-                keywords.append("cryptocurrency")
-            
-            # Obter tags da notícia
-            tags = item.get("tags", "")
-            if not tags:
-                tags = "bitcoin,cryptocurrency,blockchain,finance,technology"
-            
-            print(f"Buscando imagens para: {' '.join(keywords[:3])} com tags: {tags}")
-            images = search_images(" ".join(keywords[:3]), tags)
-            
-            # Fallback para imagem padrão se nenhuma imagem for encontrada
-            if not images:
-                print("Nenhuma imagem válida encontrada. Usando imagem padrão de Bitcoin.")
-                default_images = [
-                    "https://images.pexels.com/photos/844124/pexels-photo-844124.jpeg",  # Bitcoin
-                    "https://images.pexels.com/photos/6770610/pexels-photo-6770610.jpeg", # Crypto
-                    "https://images.pexels.com/photos/7788009/pexels-photo-7788009.jpeg"  # Blockchain
-                ]
-                images = default_images
-            
-            # Normalizar título para o nome do arquivo
-            normalized_title = normalize_title(item['title'])
-            
-            # Criar vídeo
-            video_file = f"{VIDEOS_DIR}/{normalized_title}.mp4"
-            create_video(audio_file, images, video_file)
-            
-            print(f"Vídeo gerado com sucesso: {video_file}")
+            if not news_body:
+                 logging.warning(f"Notícia '{news_title}' não possui corpo. O vídeo pode ser menos informativo.")
+
+            full_text_for_video = news_title + ". " + news_body
+
+            normalized_title = normalize_title_for_file_cli(news_title)
+            base_filename = f"{normalized_title}_{news_id}"
+
+            audio_file = os.path.join(AUDIO_DIR, f"{base_filename}.mp3")
+            video_output_file = os.path.join(VIDEOS_DIR, f"{base_filename}.mp4")
+
+            logging.info(f"Gerando áudio para '{news_title}' em {audio_file}...")
+            text_to_speech(full_text_for_video, audio_file, lang='en') # Assumindo inglês
+            if not os.path.exists(audio_file) or os.path.getsize(audio_file) == 0:
+                logging.error(f"Falha ao gerar áudio ou áudio vazio: {audio_file}")
+                continue
+            logging.info(f"Áudio gerado: {audio_file}")
+
+            logging.info(f"Gerando vídeo para '{news_title}' em {video_output_file}...")
+            create_video_synced(
+                full_text=full_text_for_video,
+                audio_file=audio_file,
+                output_video_file=video_output_file,
+                news_title=news_title, # Passando o título da notícia
+                words_per_image=8
+            )
+            if not os.path.exists(video_output_file) or os.path.getsize(video_output_file) == 0:
+                 logging.error(f"Falha na criação do vídeo ou arquivo de vídeo vazio: {video_output_file}")
+                 continue
+            logging.info(f"Vídeo gerado com sucesso: {video_output_file}")
 
         except Exception as e:
-            print(f"Erro ao processar notícia (ID: {item.get('id')}): {e}")
+            logging.error(f"Erro ao processar notícia ID {news_id} - Título: {news_title}: {e}", exc_info=True)
+            continue 
+
+    logging.info("Processo CLI CryptoCaster concluído.")
 
 if __name__ == "__main__":
-    main()
+    main_cli()

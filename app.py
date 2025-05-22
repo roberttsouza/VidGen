@@ -4,14 +4,32 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 import streamlit as st
 from src.apis.news_api import fetch_bitcoin_news
 from src.utils.text_to_speech import text_to_speech
-from src.apis.pexels_api import search_images
-from src.utils.video_creator import create_video
-from src.config import AUDIO_DIR, VIDEOS_DIR
+from src.utils.video_creator import create_video_synced
+from src.config import AUDIO_DIR, VIDEOS_DIR, IMAGES_DIR
 import os
 import re
 from datetime import datetime
+import random
+import nltk # Para o download de recursos
 
-# Configuração inicial do Streamlit
+# --- Configuração do NLTK ---
+def setup_nltk_resources():
+    resources = [("tokenizers/punkt", "punkt"), ("corpora/stopwords", "stopwords")]
+    downloaded_any = False
+    for resource_path, resource_id in resources:
+        try:
+            nltk.data.find(resource_path)
+        except LookupError:
+            st.info(f"Baixando recurso NLTK necessário: '{resource_id}'...")
+            nltk.download(resource_id, quiet=True)
+            st.success(f"Recurso '{resource_id}' baixado.")
+            downloaded_any = True
+    # if downloaded_any:
+    #     st.experimental_rerun() # Rerun se algo foi baixado para garantir que o app use
+setup_nltk_resources()
+# --- Fim Configuração NLTK ---
+
+
 st.set_page_config(
     page_title="CryptoCaster - Gerador de Vídeos Automáticos",
     page_icon="🎥",
@@ -19,106 +37,106 @@ st.set_page_config(
 )
 
 st.title("🎥 CryptoCaster - Gerador de Vídeos Automáticos")
-st.markdown("Crie vídeos automáticos com base em notícias sobre Bitcoin.")
+st.markdown("Crie vídeos automáticos com base em notícias sobre Bitcoin, com imagens sincronizadas.")
 
-# Função para normalizar título (remover caracteres especiais)
-def normalize_title(title):
-    # Substituir caracteres especiais e espaços por underscores
-    normalized = re.sub(r'[^\w\s]', '', title)
-    normalized = normalized.replace(' ', '_')
-    # Limitar tamanho para evitar nomes de arquivo muito longos
-    if len(normalized) > 100:
-        normalized = normalized[:100]
-    return normalized
+def normalize_title_for_file(title):
+    normalized = re.sub(r'[^\w\s-]', '', title).strip()
+    normalized = re.sub(r'[-\s]+', '_', normalized)
+    return normalized[:80] # Reduzido para nomes de arquivo mais curtos
 
-# Usar session_state para armazenar as notícias e evitar recarregar tudo
 if "news_data" not in st.session_state:
     st.session_state.news_data = []
-# Botão para buscar notícias
-if st.button("Buscar Notícias"):
+if "current_video_path" not in st.session_state:
+    st.session_state.current_video_path = None
+
+if st.button("Buscar Notícias de Bitcoin"):
     with st.spinner("Buscando notícias..."):
         news = fetch_bitcoin_news()
         if not news:
             st.error("Nenhuma notícia encontrada. Tente novamente mais tarde.")
+            st.session_state.news_data = []
         else:
-            st.session_state.news_data = news  # Armazenar no session_state
+            st.session_state.news_data = news
             st.success(f"{len(news)} notícias encontradas!")
+        st.session_state.current_video_path = None # Limpa vídeo anterior
 
-# Exibir notícias após a busca
 if st.session_state.news_data:
-    for item in st.session_state.news_data:
-        with st.expander(f"📰 {item['title']}"):
-            st.write(f"Fonte: {item['source']}")
-            st.write(f"Publicado em: {datetime.fromtimestamp(item['published_on']).strftime('%d/%m/%Y')}")
-            st.write(f"[Link para a notícia original]({item['url']})")
+    for index, item in enumerate(st.session_state.news_data):
+        news_title = item.get('title', f"Noticia_{index}")
+        news_id = str(item.get('id', f"idx{index}_{random.randint(1000,9999)}"))
+        
+        button_key = f"generate_{news_id}_{normalize_title_for_file(news_title[:20])}"
+
+        with st.expander(f"📰 {news_title}"):
+            st.write(f"Fonte: {item.get('source_info', {}).get('name', item.get('source', 'Desconhecida'))}")
+            st.write(f"Publicado em: {datetime.fromtimestamp(item['published_on']).strftime('%d/%m/%Y %H:%M')}")
+            if item.get('url'):
+                st.write(f"[Link para a notícia original]({item['url']})")
             
-            # Botão para gerar vídeo
-            if st.button(f"🎬 Gerar Vídeo para '{item['title']}'", key=f"generate_{item['id']}"):
-                with st.spinner(f"Gerando vídeo para '{item['title']}'..."):
-                        try:
-                            # Criar nome de arquivo baseado no título da notícia
-                            normalized_title = normalize_title(item['title'])
-                            
-                            audio_file = f"{AUDIO_DIR}/audio_{item['id']}.mp3"
-                            video_file = f"{VIDEOS_DIR}/{normalized_title}.mp4"
+            body_preview = item.get('body', '')
+            st.caption(f"Corpo: {body_preview[:300]}{'...' if len(body_preview) > 300 else ''}")
 
-                            # Garantir diretórios existem
-                            os.makedirs(os.path.dirname(audio_file), exist_ok=True)
-                            os.makedirs(os.path.dirname(video_file), exist_ok=True)
+            if st.button(f"🎬 Gerar Vídeo para '{news_title}'", key=button_key):
+                st.session_state.current_video_path = None 
+                
+                if not body_preview:
+                    st.warning("O corpo da notícia está vazio. O vídeo pode não ser muito informativo.")
+                
+                with st.spinner(f"Gerando vídeo para '{news_title}'... Isso pode levar alguns minutos."):
+                    progress_bar = st.progress(0, text="Iniciando...")
+                    try:
+                        normalized_title_for_file = normalize_title_for_file(news_title)
+                        base_filename = f"{normalized_title_for_file}_{news_id}"
+                        
+                        audio_file = os.path.join(AUDIO_DIR, f"{base_filename}.mp3")
+                        video_file = os.path.join(VIDEOS_DIR, f"{base_filename}.mp4")
 
-                            # Gerar áudio
-                            try:
-                                text_to_speech(item["title"] + ". " + item["body"], audio_file)
-                                logging.info(f"Áudio gerado em: {audio_file}")
-                            except Exception as e:
-                                logging.error(f"Erro ao gerar áudio: {str(e)}")
-                                st.error(f"Falha ao gerar áudio: {str(e)}")
-                                continue
+                        os.makedirs(AUDIO_DIR, exist_ok=True)
+                        os.makedirs(VIDEOS_DIR, exist_ok=True)
+                        os.makedirs(IMAGES_DIR, exist_ok=True)
 
-                            logging.info(f"Áudio gerado: {audio_file}")
+                        full_text_for_video = news_title + ". " + body_preview
+                        
+                        progress_bar.progress(10, text="Passo 1/3: Gerando áudio...")
+                        text_to_speech(full_text_for_video, audio_file, lang='en') # Assumindo inglês
+                        if not os.path.exists(audio_file) or os.path.getsize(audio_file) == 0:
+                            st.error(f"Falha ao gerar áudio ou arquivo de áudio vazio: {audio_file}")
+                            raise Exception("Geração de áudio falhou")
+                        logging.info(f"Áudio gerado em: {audio_file}")
+                        progress_bar.progress(33, text="Áudio gerado. Passo 2/3: Preparando imagens...")
+                        
+                        create_video_synced(
+                            full_text_for_video, 
+                            audio_file, 
+                            video_file, 
+                            news_title=news_title, # Passando o título da notícia
+                            words_per_image=8
+                        )
+                        progress_bar.progress(90, text="Passo 3/3: Renderizando vídeo final...")
+                        
+                        if not os.path.exists(video_file) or os.path.getsize(video_file) == 0:
+                            st.error("Falha na criação do vídeo ou arquivo de vídeo vazio.")
+                            raise Exception("Criação de vídeo falhou")
 
-                            # Verificar existência do áudio
-                            if not os.path.exists(audio_file):
-                                raise FileNotFoundError(f"Áudio não encontrado: {audio_file}")
-
-                            # Buscar imagens com as palavras-chave retiradas do título, categorias e tags
-                            # Extrair termos relevantes do título
-                            keywords = [w for w in item["title"].split() if len(w) > 3]
-                            # Verificar se há termos sobre blockchain ou crypto no título
-                            crypto_terms = ["bitcoin", "blockchain", "crypto", "token", "whale", 
-                                           "transaction", "trading", "market", "nft", "currency"]
-                            
-                            # Adicionar "bitcoin" e "cryptocurrency" às palavras-chave se não houver
-                            # termos relacionados no título
-                            has_crypto_term = any(term in item["title"].lower() for term in crypto_terms)
-                            if not has_crypto_term:
-                                keywords.append("bitcoin")
-                                keywords.append("cryptocurrency")
-                            
-                            # Obter tags da notícia
-                            tags = item.get("tags", "")
-                            if not tags:
-                                tags = "bitcoin,cryptocurrency,blockchain,finance,technology"
-                            
-                            st.text(f"Buscando imagens para: {' '.join(keywords[:3])} com tags: {tags}")
-                            images = search_images(" ".join(keywords[:3]), tags)
-                            
-                            if not images:
-                                logging.warning("Nenhuma imagem relevante encontrada. Usando imagem padrão.")
-                                images = ["https://images.pexels.com/photos/844124/pexels-photo-844124.jpeg"]
-                                st.warning("Nenhuma imagem relevante encontrada. Usando imagem padrão de Bitcoin.")
-
-                            # Criar vídeo com rastreamento completo
-                            try:
-                                logging.info(f"Iniciando criação do vídeo para {item['title']}")
-                                create_video(audio_file, images, video_file)
-                                logging.info(f"Vídeo finalizado: {video_file}")
-                                st.success("Vídeo gerado com sucesso!")
-                                st.video(video_file)
-                            except Exception as e:
-                                logging.error(f"Erro crítico ao criar vídeo: {str(e)}", exc_info=True)
-                                st.error("Ocorreu um erro durante a geração do vídeo. Verifique os logs.")
-                                continue
-                        except Exception as e:
-                            logging.error(f"Erro crítico geral: {str(e)}", exc_info=True)
-                            st.error("Erro inesperado. Verifique os logs do aplicativo.")
+                        logging.info(f"Vídeo finalizado: {video_file}")
+                        progress_bar.progress(100, text="Vídeo gerado com sucesso!")
+                        st.success("Vídeo gerado com sucesso!")
+                        st.session_state.current_video_path = video_file
+                    
+                    except Exception as e:
+                        logging.error(f"Erro crítico durante a geração do vídeo para '{news_title}': {e}", exc_info=True)
+                        st.error(f"Ocorreu um erro: {e}. Verifique os logs.")
+                        if 'progress_bar' in locals(): progress_bar.empty()
+    
+    if st.session_state.current_video_path and os.path.exists(st.session_state.current_video_path):
+        st.video(st.session_state.current_video_path)
+        with open(st.session_state.current_video_path, "rb") as file_content:
+            st.download_button(
+                label="Baixar Vídeo",
+                data=file_content,
+                file_name=os.path.basename(st.session_state.current_video_path),
+                mime="video/mp4",
+                key=f"download_{os.path.basename(st.session_state.current_video_path)}"
+            )
+    elif st.session_state.current_video_path:
+        st.warning(f"Arquivo de vídeo '{st.session_state.current_video_path}' não encontrado. Por favor, gere novamente.")
